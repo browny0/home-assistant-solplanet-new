@@ -237,7 +237,8 @@
       "submeter_energy_imported_today": { "name": "Energía importada hoy del medidor secundario" },
       "submeter_energy_imported_total": { "name": "Energía importada total del medidor secundario" },
       "submeter_energy_exported_today": { "name": "Energía exportada hoy del medidor secundario" },
-      "submeter_energy_exported_total": { "name": "Energía exportada total del medidor secundario" }
+      "submeter_energy_exported_total": { "name": "Energía exportada total del medidor secundario" },
+      "import_current_limit": { "name": "Límite de corriente de importación"}
     },
     "switch": {
       "inverter_power": { "name": "Potencia" },
