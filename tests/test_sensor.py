@@ -65,8 +65,10 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
     """Meter descriptions distinguish V2 main meters, sub-meters and V1 data."""
     coordinator = FakeCoordinator()
     main = sensor.create_meter_entities_description(coordinator, "meter-1")
-    assert len(main) == 19
-    limit = next(item for item in main if item.unique_id_suffix == "power_limit_control")
+    assert len(main) == 21
+    limit = next(
+        item for item in main if item.unique_id_suffix == "power_limit_control"
+    )
     mapper = limit.data_field_value_mapper
     assert mapper(None) is None
     assert mapper({}) == "Disabled"

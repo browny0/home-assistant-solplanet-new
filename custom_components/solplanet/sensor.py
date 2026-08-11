@@ -256,6 +256,22 @@ def _create_power_limit_entities_description(
             _power_limit_sensor(
                 isn,
                 data_type,
+                "import_current_limit",
+                mapper=_power_limit_value("maxInCurr", when=("ctrlType", 1)),
+                unit=UnitOfElectricCurrent.AMPERE,
+                device_class=SensorDeviceClass.CURRENT,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
+                "export_current_limit",
+                mapper=_power_limit_value("maxOutCurr", when=("ctrlType", 1)),
+                unit=UnitOfElectricCurrent.AMPERE,
+                device_class=SensorDeviceClass.CURRENT,
+            ),
+            _power_limit_sensor(
+                isn,
+                data_type,
                 "communication_loss_timeout",
                 path=["lostTime"],
                 unit=UnitOfTime.SECONDS,
