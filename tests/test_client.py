@@ -288,11 +288,12 @@ def test_battery_work_modes_include_known_and_unknown_modes() -> None:
     """Known modes remain stable and unknown firmware values remain selectable."""
     modes = BatteryWorkModes()
     known = modes.get_all_modes(1, 2)
-    assert len(known) == 5
+    assert len(known) == 6
     assert modes.get_mode(1, 2) == BatteryWorkMode("Self-consumption mode", 2, 1)
+    assert modes.get_mode(1, 0) == BatteryWorkMode("Idle mode", 0, 1)
 
     unknown = modes.get_all_modes(9, 99)
-    assert len(unknown) == 6
+    assert len(unknown) == 7
     assert unknown[-1] == BatteryWorkMode("Unknown (mod_r: 99, type: 9)", 99, 9)
     assert modes.get_mode(9, 99) == unknown[-1]
 
