@@ -11,8 +11,9 @@ Use the battery's **Work mode** entity to choose how it operates. Only select a 
 | Custom mode | Follow charge and discharge periods that you define. |
 | Off-grid mode | Operate according to the hardware's supported off-grid behaviour. Do not select this just to disconnect from the Solplanet cloud. |
 | Time of use mode | Use the time-of-use settings configured by your system or Solplanet app. |
+| Idle mode | The battery neither charges nor discharges. Household load and surplus solar are handled by the grid instead. |
 
-Our integration can select all five modes, but your hardware may not support every mode. It manages Custom mode schedule slots directly; it does not expose the Solplanet app's full Time of Use configuration.
+Our integration can select all six modes, but your hardware may not support every mode. It manages Custom mode schedule slots directly; it does not expose the Solplanet app's full Time of Use configuration.
 
 ## Create A Custom Schedule
 
