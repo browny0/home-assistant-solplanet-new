@@ -14,20 +14,27 @@ Use the inverter device to monitor power, production, frequency, temperatures, w
 
 Turning off **Power** can stop the inverter. Keep this switch away from general-purpose dashboards and automations unless you deliberately need it.
 
-On V2 systems, **Grid status** shows whether the inverter is connected to the grid.
-It is only created once the inverter reports it. If this reading is missing, you can enable **Modbus telemetry fallbacks** in the
+On V2 systems, **Grid status** shows whether the inverter is connected to the grid,
+using the inverter's `grid_sts` JSON field when provided. It is only created once
+the inverter reports it. If this reading is missing, you can enable **Modbus telemetry fallbacks** in the
+
 integration's **Configure** options. This is off by default and does not affect
-existing settings reads.
+existing settings reads. The fallback reads input register **31391** (function 04,
+offset 1390) at the inverter address from device discovery, using the normal
+inverter polling interval and shared gateway queue. Values 1 and 0 mean connected
+and disconnected; no settings are written.
 
-When needed, the fallback adds a read to each inverter poll, with a 3-second deadline.
-After three consecutive failed reads, it pauses for 10 minutes. Each failed recovery
-probe starts another 10-minute pause. Unsupported reads stop until the integration
-is reloaded or the option is turned off and back on. Failed or skipped reads show
-**Unknown**.
+Failed or skipped reads leave Grid status unknown without marking other telemetry
+as failed. Each read has a 3-second deadline. After three consecutive failed reads,
+the integration pauses for 10 minutes; each failed recovery probe starts another
+10-minute pause. Unsupported reads stop until the integration is reloaded or the
+option is turned off and back on. A failed request can still hold the shared queue
+until the configured request timeout and retries finish.
 
-Off-grid mode can show disconnected even when utility power is available.
-Short interruptions may also be missed between polls. If you use this fallback,
-remove any separate polling of the same grid-status register to avoid duplicate reads.
+Off-grid mode can show disconnected even when utility power is available. This is
+not a verified indication of physical utility voltage on every model, and short
+interruptions may be missed between polls. If you use this fallback, remove any
+separate polling of the same grid-status register to avoid duplicate reads.
 
 ### Battery
 

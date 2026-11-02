@@ -304,10 +304,16 @@ class ModbusApiMixin:
                 raise ValueError("Modbus read response has an unexpected device address")
             if reply[1] != (request[1] | 0x80):
                 expected_bytes = int.from_bytes(request[4:6], "big") * 2
-                if reply[1] != request[1] or len(reply) != expected_bytes + 5 or reply[2] != expected_bytes:
+                if (
+                    reply[1] != request[1]
+                    or len(reply) != expected_bytes + 5
+                    or reply[2] != expected_bytes
+                ):
                     raise ValueError("Modbus read response does not match the requested registers")
 
-        data = ModbusRtuFrameGenerator().decode_response(response_hex=response_frame, data_type=data_type)
+        data = ModbusRtuFrameGenerator().decode_response(
+            response_hex=response_frame, data_type=data_type
+        )
         _LOGGER.debug("Modbus RTU response decoded: %s", data)
 
         return data

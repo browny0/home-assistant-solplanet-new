@@ -732,9 +732,13 @@ async def test_grid_register_crc_failure_and_exception_response() -> None:
 async def test_modbus_read_validation_preserves_write_acknowledgements() -> None:
     """Read-response validation leaves the existing write acknowledgement path intact."""
     client = MagicMock()
-    frame = ModbusRtuFrameGenerator().generate_write_single_holding_register_frame(7, 40201, 1, DataType.U16)
+    frame = ModbusRtuFrameGenerator().generate_write_single_holding_register_frame(
+        7, 40201, 1, DataType.U16
+    )
     client.post = AsyncMock(return_value={"data": frame})
-    assert await _ModbusApi(client).modbus_write_single_holding_register(DataType.U16, 7, 40201, 1) == {
+    assert await _ModbusApi(client).modbus_write_single_holding_register(
+        DataType.U16, 7, 40201, 1
+    ) == {
         "device_id": 7,
         "function_code": 6,
         "register_address": 200,
