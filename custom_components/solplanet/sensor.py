@@ -91,6 +91,52 @@ def _create_mppt_power_mapper(
     return map_mppt_power
 
 
+def _create_load_power_mapper(
+    coordinator: SolplanetDataUpdateCoordinator, meter_id: str
+) -> abc.Callable[[Any], float | int | None]:
+    """Create a mapper for load as inverter AC output plus grid power."""
+    warning_reason: str | None = None
+
+    def unknown(reason: str) -> None:
+        nonlocal warning_reason
+        if warning_reason == reason:
+            return
+        warning_reason = reason
+        _LOGGER.warning("Load power for meter %s is unknown: %s", meter_id, reason)
+
+    def field_value(data: Any, field: str) -> float | int | None:
+        value = data.get(field) if isinstance(data, dict) else getattr(data, field, None)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        return value
+
+    def map_load_power(grid_data: Any) -> float | int | None:
+        nonlocal warning_reason
+
+        grid_power = field_value(grid_data, "power")
+        if grid_power is None:
+            grid_power = field_value(grid_data, "pac")
+        if grid_power is None:
+            unknown("grid power is missing")
+            return None
+
+        inverter_entries = coordinator.data.get(INVERTER_IDENTIFIER, {})
+        if len(inverter_entries) != 1:
+            unknown(f"expected one inverter payload, found {len(inverter_entries)}")
+            return None
+
+        inverter_data = next(iter(inverter_entries.values())).get("data")
+        inverter_power = field_value(inverter_data, "pac")
+        if inverter_power is None:
+            unknown("inverter power is missing")
+            return None
+
+        warning_reason = None
+        return inverter_power + grid_power
+
+    return map_load_power
+
+
 def _create_dict_mapper(
     dictionary: abc.Mapping[int, str], default: str = "Unknown (code: {value})"
 ) -> abc.Callable[[int], str]:
@@ -600,6 +646,18 @@ def create_meter_entities_description(
                 unique_id_suffix="power",
             ),
             SolplanetSensorEntityDescription(
+                key=f"{isn}_load_power",
+                translation_key="load_power",
+                data_field_device_type=METER_IDENTIFIER,
+                data_field_data_type="app_data",
+                data_field_path=[],
+                data_field_value_mapper=_create_load_power_mapper(coordinator, isn),
+                native_unit_of_measurement=UnitOfPower.WATT,
+                device_class=SensorDeviceClass.POWER,
+                state_class=SensorStateClass.MEASUREMENT,
+                unique_id_suffix="load_power",
+            ),
+            SolplanetSensorEntityDescription(
                 key=f"{isn}_uv",
                 translation_key="line_neutral_voltage",
                 entity_registry_enabled_default=False,
@@ -747,6 +805,18 @@ def create_meter_entities_description(
             device_class=SensorDeviceClass.POWER,
             state_class=SensorStateClass.MEASUREMENT,
             unique_id_suffix="pac",
+        ),
+        SolplanetSensorEntityDescription(
+            key=f"{isn}_load_power",
+            translation_key="load_power",
+            data_field_device_type=METER_IDENTIFIER,
+            data_field_data_type="data",
+            data_field_path=[],
+            data_field_value_mapper=_create_load_power_mapper(coordinator, isn),
+            native_unit_of_measurement=UnitOfPower.WATT,
+            device_class=SensorDeviceClass.POWER,
+            state_class=SensorStateClass.MEASUREMENT,
+            unique_id_suffix="load_power",
         ),
         SolplanetSensorEntityDescription(
             key=f"{isn}_iet",

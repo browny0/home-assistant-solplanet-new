@@ -11,6 +11,7 @@ import pytest
 from custom_components.solplanet import sensor
 from custom_components.solplanet.client import GetInverterDataResponse, GetMeterDataResponse
 from custom_components.solplanet.const import (
+    BATTERY_IDENTIFIER,
     INVERTER_IDENTIFIER,
     METER_IDENTIFIER,
 )
@@ -65,7 +66,13 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
     """Meter descriptions distinguish V2 main meters, sub-meters and V1 data."""
     coordinator = FakeCoordinator()
     main = sensor.create_meter_entities_description(coordinator, "meter-1")
-    assert len(main) == 21
+    assert len(main) == 22
+    load = next(item for item in main if item.unique_id_suffix == "load_power")
+    assert sensor.SolplanetSensor(load, "meter-1", coordinator)._attr_native_value == 2700
+
+    coordinator.data[INVERTER_IDENTIFIER]["inv-1"]["data"].pac = None
+    assert sensor.SolplanetSensor(load, "meter-1", coordinator)._attr_native_value is None
+    coordinator.data[INVERTER_IDENTIFIER]["inv-1"]["data"].pac = 2400
     limit = next(
         item for item in main if item.unique_id_suffix == "power_limit_control"
     )
@@ -111,7 +118,7 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
         ),
     }
     legacy = sensor.create_meter_entities_description(coordinator, "v1")
-    assert len(legacy) == 8
+    assert len(legacy) == 9
     legacy_by_suffix = {item.unique_id_suffix: item for item in legacy}
     assert (
         sensor.SolplanetSensor(legacy_by_suffix["power_limit_control"], "v1", coordinator)._attr_native_value

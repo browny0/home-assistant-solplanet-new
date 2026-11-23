@@ -182,6 +182,7 @@
       "mppt_current": { "name": "MPPT {mppt} current" },
       "mppt_power": { "name": "MPPT {mppt} power" },
       "meter_power": { "name": "Meter power" },
+      "load_power": { "name": "Load power" },
       "line_neutral_voltage": { "name": "LN voltage" },
       "line_neutral_current": { "name": "LN current" },
       "line_neutral_active_power": { "name": "LN active power" },

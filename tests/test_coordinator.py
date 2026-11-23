@@ -873,6 +873,26 @@ async def test_metadata_refresh_primes_each_available_live_coordinator() -> None
 
 
 @pytest.mark.asyncio
+async def test_metadata_refresh_deduplicates_shared_live_coordinator() -> None:
+    """Battery and meter discoveries do not refresh their shared coordinator twice."""
+    hass = HomeAssistant("/tmp")
+    runtime = SolplanetRuntimeData(_api())
+    coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
+    shared = SimpleNamespace(async_refresh=AsyncMock())
+    runtime.battery_coordinator = shared
+    runtime.meter_coordinator = shared
+    coordinator._new_device_ids = {
+        BATTERY_IDENTIFIER: {"bat"},
+        METER_IDENTIFIER: {"meter"},
+    }
+    coordinator._async_update_runtime_data = AsyncMock()
+
+    await coordinator._async_update_data()
+
+    shared.async_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_metadata_inventory_orchestration_and_empty_inventory() -> None:
     """Metadata updates each endpoint family and records newly seen devices."""
     hass = HomeAssistant("/tmp")
@@ -1335,6 +1355,34 @@ async def test_battery_all_failures_raise_and_empty_inventory_succeeds() -> None
 
     runtime.data[BATTERY_IDENTIFIER] = {}
     await coordinator._async_update_runtime_data()
+
+
+@pytest.mark.asyncio
+async def test_meter_coordinator_refreshes_inverter_before_grid() -> None:
+    """Combined live-power polling reads inverter before meter."""
+    hass = HomeAssistant("/tmp")
+    request_order: list[str] = []
+    api = _api()
+    runtime = SolplanetRuntimeData(api)
+    runtime.data[INVERTER_IDENTIFIER] = {"inv": {"data": None}}
+    runtime.data[METER_IDENTIFIER] = {"main": {"app_info": {}, "app_data": None}}
+
+    async def inverter_data(_sn: str) -> SimpleNamespace:
+        request_order.append("inverter")
+        return SimpleNamespace(pac=2400)
+
+    async def meter_data(_endpoint: str, _payload: dict) -> dict:
+        request_order.append("meter")
+        return {"status": 200, "payload": {"power": 300}}
+
+    api.get_inverter_data.side_effect = inverter_data
+    api.client.post.side_effect = meter_data
+    coordinator = SolplanetMeterUpdateCoordinator(hass, runtime, _entry(), timedelta(seconds=10))
+    assert coordinator.name == f"{DOMAIN}_meter"
+
+    await coordinator._async_update_runtime_data()
+
+    assert request_order == ["inverter", "meter"]
 
 
 @pytest.mark.asyncio

@@ -33,7 +33,6 @@ from .coordinator import (
     SolplanetBatteryUpdateCoordinator,
     SolplanetConfigEntry,
     SolplanetDongleUpdateCoordinator,
-    SolplanetInverterUpdateCoordinator,
     SolplanetMetadataUpdateCoordinator,
     SolplanetMeterUpdateCoordinator,
     SolplanetRuntimeData,
@@ -302,13 +301,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) ->
     configured_interval = int(entry.data.get(CONF_INTERVAL, DEFAULT_INTERVAL))
     live_interval = timedelta(seconds=max(MIN_INTERVAL, min(configured_interval, MAX_INTERVAL)))
 
-    runtime.inverter_coordinator = SolplanetInverterUpdateCoordinator(
+    runtime.meter_coordinator = SolplanetMeterUpdateCoordinator(
         hass,
         runtime,
         entry,
         live_interval,
     )
-    await runtime.inverter_coordinator.async_refresh()
+    runtime.inverter_coordinator = runtime.meter_coordinator
+    await runtime.meter_coordinator.async_refresh()
 
     runtime.battery_coordinator = SolplanetBatteryUpdateCoordinator(
         hass,
@@ -317,14 +317,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolplanetConfigEntry) ->
         live_interval,
     )
     await runtime.battery_coordinator.async_refresh()
-
-    runtime.meter_coordinator = SolplanetMeterUpdateCoordinator(
-        hass,
-        runtime,
-        entry,
-        live_interval,
-    )
-    await runtime.meter_coordinator.async_refresh()
 
     runtime.dongle_coordinator = SolplanetDongleUpdateCoordinator(
         hass,

@@ -182,6 +182,7 @@
       "mppt_current": { "name": "Corriente MPPT {mppt}" },
       "mppt_power": { "name": "Potencia MPPT {mppt}" },
       "meter_power": { "name": "Potencia del medidor" },
+      "load_power": { "name": "Potencia de carga" },
       "line_neutral_voltage": { "name": "Voltaje fase-neutro" },
       "line_neutral_current": { "name": "Corriente fase-neutro" },
       "line_neutral_active_power": { "name": "Potencia activa fase-neutro" },

@@ -323,9 +323,8 @@ async def test_setup_entry_imports_real_platforms_and_builds_runtime() -> None:
         async_add_listener=Mock(return_value="remove-listener"),
         last_update_success=True,
     )
-    inverter = SimpleNamespace(async_refresh=AsyncMock())
-    battery = SimpleNamespace(async_refresh=AsyncMock())
     meter = SimpleNamespace(async_refresh=AsyncMock())
+    battery = SimpleNamespace(async_refresh=AsyncMock())
     dongle = SimpleNamespace(async_refresh=AsyncMock())
 
     async def forward_and_import(_entry: object, platforms: list[object]) -> None:
@@ -346,19 +345,14 @@ async def test_setup_entry_imports_real_platforms_and_builds_runtime() -> None:
         ) as metadata_factory,
         patch.object(
             integration,
-            "SolplanetInverterUpdateCoordinator",
-            return_value=inverter,
-        ) as inverter_factory,
+            "SolplanetMeterUpdateCoordinator",
+            return_value=meter,
+        ) as meter_factory,
         patch.object(
             integration,
             "SolplanetBatteryUpdateCoordinator",
             return_value=battery,
-        ),
-        patch.object(
-            integration,
-            "SolplanetMeterUpdateCoordinator",
-            return_value=meter,
-        ),
+        ) as battery_factory,
         patch.object(
             integration,
             "SolplanetDongleUpdateCoordinator",
@@ -371,13 +365,16 @@ async def test_setup_entry_imports_real_platforms_and_builds_runtime() -> None:
     client_factory.assert_called_once_with("inverter.local", "session")
     metadata_factory.assert_called_once()
     metadata.async_config_entry_first_refresh.assert_awaited_once()
-    inverter.async_refresh.assert_awaited_once()
-    battery.async_refresh.assert_awaited_once()
     meter.async_refresh.assert_awaited_once()
+    battery.async_refresh.assert_awaited_once()
     dongle.async_refresh.assert_awaited_once()
-    assert inverter_factory.call_args.args[3].total_seconds() == MIN_INTERVAL
+    assert meter_factory.call_args.args[3].total_seconds() == MIN_INTERVAL
+    assert battery_factory.call_args.args[3].total_seconds() == MIN_INTERVAL
     assert isinstance(entry.runtime_data, SolplanetRuntimeData)
     assert entry.runtime_data.metadata_coordinator is metadata
+    assert entry.runtime_data.inverter_coordinator is meter
+    assert entry.runtime_data.battery_coordinator is battery
+    assert entry.runtime_data.meter_coordinator is meter
     assert hass.data[DOMAIN][entry.entry_id] is entry.runtime_data
     entry.async_on_unload.assert_called_once_with("remove-listener")
     listener = metadata.async_add_listener.call_args.args[0]
@@ -415,17 +412,14 @@ async def test_setup_entry_clamps_large_poll_interval() -> None:
         patch.object(integration.dr, "async_get", return_value=registry),
         patch.object(integration, "SolplanetMetadataUpdateCoordinator", return_value=metadata),
         patch.object(
-            integration,
-            "SolplanetInverterUpdateCoordinator",
-            return_value=live[0],
-        ) as inverter_factory,
+            integration, "SolplanetMeterUpdateCoordinator", return_value=live[2]
+        ) as meter_factory,
         patch.object(integration, "SolplanetBatteryUpdateCoordinator", return_value=live[1]),
-        patch.object(integration, "SolplanetMeterUpdateCoordinator", return_value=live[2]),
         patch.object(integration, "SolplanetDongleUpdateCoordinator", return_value=live[3]),
     ):
         assert await integration.async_setup_entry(hass, entry) is True
 
-    assert inverter_factory.call_args.args[3].total_seconds() == MAX_INTERVAL
+    assert meter_factory.call_args.args[3].total_seconds() == MAX_INTERVAL
 
 
 @pytest.mark.asyncio

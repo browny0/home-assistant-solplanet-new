@@ -650,9 +650,13 @@ class SolplanetMetadataUpdateCoordinator(SolplanetDataUpdateCoordinator):
             METER_IDENTIFIER: self.runtime.meter_coordinator,
             DONGLE_IDENTIFIER: self.runtime.dongle_coordinator,
         }
+        refreshed_coordinators: set[int] = set()
         for device_type, device_ids in self._new_device_ids.items():
             if coordinator := coordinators[device_type]:
-                await coordinator.async_refresh()
+                coordinator_id = id(coordinator)
+                if coordinator_id not in refreshed_coordinators:
+                    await coordinator.async_refresh()
+                    refreshed_coordinators.add(coordinator_id)
             async_dispatcher_send(
                 self.hass,
                 DISCOVERY_SIGNAL,
@@ -1145,7 +1149,7 @@ class SolplanetBatteryUpdateCoordinator(SolplanetDataUpdateCoordinator):
 
 
 class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
-    """Poll live meter telemetry."""
+    """Poll inverter and meter telemetry as one live-power cycle."""
 
     def __init__(
         self,
@@ -1154,7 +1158,7 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
         config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
     ) -> None:
-        """Initialize the meter coordinator."""
+        """Initialize the combined inverter and meter coordinator."""
         super().__init__(
             hass,
             runtime,
@@ -1162,10 +1166,17 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
             name="meter",
             update_interval=update_interval,
         )
+        self._modbus_telemetry_fallbacks = (
+            config_entry.data.get(CONF_MODBUS_TELEMETRY_FALLBACKS, False) is True
+        )
+        self._grid_status_retry_after: dict[int, float] = {}
+        self._grid_status_failures: dict[int, int] = {}
+        self._grid_status_unsupported: set[int] = set()
 
     @override
     async def _async_update_runtime_data(self) -> None:
-        """Refresh app-protocol or legacy meter telemetry."""
+        """Refresh inverter, then meter within one coordinator update."""
+        await SolplanetInverterUpdateCoordinator._async_update_runtime_data(self)
         entries = self.runtime.data[METER_IDENTIFIER]
         app_meter_ids = [meter_id for meter_id, entry in entries.items() if "app_info" in entry]
 
