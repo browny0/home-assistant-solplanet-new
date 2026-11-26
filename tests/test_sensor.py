@@ -11,7 +11,6 @@ import pytest
 from custom_components.solplanet import sensor
 from custom_components.solplanet.client import GetInverterDataResponse, GetMeterDataResponse
 from custom_components.solplanet.const import (
-    BATTERY_IDENTIFIER,
     INVERTER_IDENTIFIER,
     METER_IDENTIFIER,
 )
@@ -162,6 +161,97 @@ def test_meter_catalog_covers_v2_submeter_v1_and_limit_modes() -> None:
         item for item in indexed_descriptions if item.unique_id_suffix == "submeter_energy_imported_total"
     )
     assert sensor.SolplanetSensor(imported, "indexed", coordinator)._attr_native_value == pytest.approx(44.8)
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_import", "expected_export"),
+    [
+        ({"ctrlType": 1, "maxInCurr": 16, "maxOutCurr": 25}, 16, 25),
+        ({"ctrlType": "1", "maxInCurr": "12", "maxOutCurr": "20"}, 12, 20),
+        ({"ctrlType": 0, "maxInCurr": 16, "maxOutCurr": 25}, None, None),
+        ({"ctrlType": 2, "maxInCurr": 16, "maxOutCurr": 25}, None, None),
+        ({"ctrlType": 1, "maxInCurr": "invalid"}, None, None),
+        ({}, None, None),
+    ],
+)
+def test_current_limit_sensor_values(settings, expected_import, expected_export) -> None:
+    """Current sensors use the correct fields and only expose current-limit mode."""
+    coordinator = FakeCoordinator()
+    coordinator.data[METER_IDENTIFIER]["meter-1"]["meter_req"] = settings
+    descriptions = {
+        item.unique_id_suffix: item
+        for item in sensor.create_meter_entities_description(coordinator, "meter-1")
+    }
+    for suffix, expected in (
+        ("import_current_limit", expected_import),
+        ("export_current_limit", expected_export),
+    ):
+        entity = sensor.SolplanetSensor(descriptions[suffix], "meter-1", coordinator)
+        assert entity._attr_native_value == expected
+        assert descriptions[suffix].native_unit_of_measurement == "A"
+
+
+@pytest.mark.parametrize(
+    ("grid", "inverter", "expected"),
+    [
+        ({"power": 300}, {"pac": 2400}, 2700),
+        ({"power": -300}, {"pac": 2400}, 2100),
+        ({"power": 0}, {"pac": 0}, 0),
+        ({"power": None, "pac": -100}, SimpleNamespace(pac=2400), 2300),
+        (SimpleNamespace(pac=100), {"pac": 2400}, 2500),
+        ({"power": True}, {"pac": 2400}, None),
+        ({"power": "100"}, {"pac": 2400}, None),
+        ({"power": 100}, {"pac": True}, None),
+        ({"power": 100}, {"pac": "2400"}, None),
+    ],
+)
+def test_load_power_mapper_handles_protocols_and_invalid_values(grid, inverter, expected) -> None:
+    """Load calculation uses signed numeric values from either meter protocol."""
+    coordinator = FakeCoordinator()
+    coordinator.data[INVERTER_IDENTIFIER]["inv-1"]["data"] = inverter
+    mapper = sensor._create_load_power_mapper(coordinator, "meter-1")
+    assert mapper(grid) == expected
+
+
+def test_legacy_load_power_entity() -> None:
+    """Legacy meters calculate load from their pac field."""
+    coordinator = FakeCoordinator()
+    coordinator.data[METER_IDENTIFIER]["legacy"] = {
+        "data": SimpleNamespace(pac=-100),
+        "info": {},
+    }
+    description = next(
+        item for item in sensor.create_meter_entities_description(coordinator, "legacy")
+        if item.unique_id_suffix == "load_power"
+    )
+    assert sensor.SolplanetSensor(description, "legacy", coordinator)._attr_native_value == 2300
+
+
+def test_load_power_missing_inverters_and_warning_recovery(caplog) -> None:
+    """Missing inputs log once per reason and a successful update resets the warning."""
+    coordinator = FakeCoordinator()
+    mapper = sensor._create_load_power_mapper(coordinator, "meter-1")
+    assert mapper({}) is None
+    assert mapper({}) is None
+    assert len(caplog.records) == 1
+    assert "grid power is missing" in caplog.records[-1].message
+
+    inverter = coordinator.data[INVERTER_IDENTIFIER].pop("inv-1")
+    assert mapper({"power": 100}) is None
+    assert "found 0" in caplog.records[-1].message
+    coordinator.data[INVERTER_IDENTIFIER].update({"inv-1": inverter, "inv-2": inverter})
+    assert mapper({"power": 100}) is None
+    assert "found 2" in caplog.records[-1].message
+
+    del coordinator.data[INVERTER_IDENTIFIER]["inv-2"]
+    inverter["data"] = None
+    assert mapper({"power": 100}) is None
+    assert "inverter power is missing" in caplog.records[-1].message
+    inverter["data"] = {"pac": 2400}
+    assert mapper({"power": 100}) == 2500
+    assert mapper({}) is None
+    assert "grid power is missing" in caplog.records[-1].message
+    assert len(caplog.records) == 5
 
 
 def test_dongle_and_battery_catalog_mappers() -> None:

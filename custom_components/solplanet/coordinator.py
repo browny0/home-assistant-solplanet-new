@@ -969,6 +969,8 @@ class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
         runtime: SolplanetRuntimeData,
         config_entry: SolplanetConfigEntry,
         update_interval: timedelta,
+        *,
+        name: str = "inverter",
     ) -> None:
         """Initialize the inverter coordinator."""
         self._modbus_telemetry_fallbacks = (
@@ -981,7 +983,7 @@ class SolplanetInverterUpdateCoordinator(SolplanetDataUpdateCoordinator):
             hass,
             runtime,
             config_entry,
-            name="inverter",
+            name=name,
             update_interval=update_interval,
         )
 
@@ -1148,7 +1150,7 @@ class SolplanetBatteryUpdateCoordinator(SolplanetDataUpdateCoordinator):
             raise last_error or RuntimeError("No battery data returned")
 
 
-class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
+class SolplanetMeterUpdateCoordinator(SolplanetInverterUpdateCoordinator):
     """Poll inverter and meter telemetry as one live-power cycle."""
 
     def __init__(
@@ -1163,20 +1165,14 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
             hass,
             runtime,
             config_entry,
+            update_interval,
             name="meter",
-            update_interval=update_interval,
         )
-        self._modbus_telemetry_fallbacks = (
-            config_entry.data.get(CONF_MODBUS_TELEMETRY_FALLBACKS, False) is True
-        )
-        self._grid_status_retry_after: dict[int, float] = {}
-        self._grid_status_failures: dict[int, int] = {}
-        self._grid_status_unsupported: set[int] = set()
 
     @override
     async def _async_update_runtime_data(self) -> None:
         """Refresh inverter, then meter within one coordinator update."""
-        await SolplanetInverterUpdateCoordinator._async_update_runtime_data(self)
+        await super()._async_update_runtime_data()
         entries = self.runtime.data[METER_IDENTIFIER]
         app_meter_ids = [meter_id for meter_id, entry in entries.items() if "app_info" in entry]
 
@@ -1210,7 +1206,7 @@ class SolplanetMeterUpdateCoordinator(SolplanetDataUpdateCoordinator):
                 entry["data"] = data
                 successful_updates += 1
 
-        self.failed_device_ids = failed_device_ids
+        self.failed_device_ids.update(failed_device_ids)
         if successful_updates == 0:
             raise last_error or RuntimeError("No meter data returned")
 

@@ -857,11 +857,6 @@ async def test_config_entry_setup_registers_real_platform_entities(hass) -> None
         ),
         patch.object(
             integration,
-            "SolplanetInverterUpdateCoordinator",
-            side_effect=live_factory,
-        ),
-        patch.object(
-            integration,
             "SolplanetBatteryUpdateCoordinator",
             side_effect=live_factory,
         ),

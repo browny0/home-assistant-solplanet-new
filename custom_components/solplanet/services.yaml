@@ -17,6 +17,8 @@ set_battery_config:
             - "Custom mode"
             - "Off-grid mode"
             - "Time of use mode"
+            - "Idle mode"
+            - "Smart AI charging mode"
     soc_min:
       name: Minimum SOC
       description: Minimum state of charge (%)

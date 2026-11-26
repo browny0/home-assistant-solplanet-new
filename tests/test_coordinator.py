@@ -874,22 +874,24 @@ async def test_metadata_refresh_primes_each_available_live_coordinator() -> None
 
 @pytest.mark.asyncio
 async def test_metadata_refresh_deduplicates_shared_live_coordinator() -> None:
-    """Battery and meter discoveries do not refresh their shared coordinator twice."""
+    """Inverter and meter discoveries do not refresh their shared coordinator twice."""
     hass = HomeAssistant("/tmp")
     runtime = SolplanetRuntimeData(_api())
     coordinator = SolplanetMetadataUpdateCoordinator(hass, runtime, _entry())
     shared = SimpleNamespace(async_refresh=AsyncMock())
-    runtime.battery_coordinator = shared
+    runtime.inverter_coordinator = shared
     runtime.meter_coordinator = shared
     coordinator._new_device_ids = {
-        BATTERY_IDENTIFIER: {"bat"},
+        INVERTER_IDENTIFIER: {"inv"},
         METER_IDENTIFIER: {"meter"},
     }
     coordinator._async_update_runtime_data = AsyncMock()
 
-    await coordinator._async_update_data()
+    with patch("custom_components.solplanet.coordinator.async_dispatcher_send") as dispatch:
+        await coordinator._async_update_data()
 
     shared.async_refresh.assert_awaited_once()
+    assert dispatch.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -1383,6 +1385,100 @@ async def test_meter_coordinator_refreshes_inverter_before_grid() -> None:
     await coordinator._async_update_runtime_data()
 
     assert request_order == ["inverter", "meter"]
+    assert runtime.data[INVERTER_IDENTIFIER]["inv"]["data"].pac == 2400
+    assert runtime.data[METER_IDENTIFIER]["main"]["app_data"] == {"power": 300}
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_combined_coordinator_grid_status_fallback(enabled: bool) -> None:
+    """The actual shared coordinator respects the Modbus fallback option."""
+    api = _api()
+    api.get_inverter_data.return_value = GetInverterDataResponse(pac=456)
+    api.client.post.return_value = {"status": 200, "payload": {"power": 50}}
+    runtime = SolplanetRuntimeData(api)
+    runtime.data[INVERTER_IDENTIFIER] = {"inv": {"info": SimpleNamespace(add=7)}}
+    runtime.data[METER_IDENTIFIER] = {"main": {"app_info": {}, "app_data": None}}
+    coordinator = SolplanetMeterUpdateCoordinator(
+        HomeAssistant("/tmp"), runtime, _entry(modbus_telemetry_fallbacks=enabled), timedelta(seconds=10)
+    )
+
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert runtime.data[INVERTER_IDENTIFIER]["inv"]["data"].grid_sts == (1 if enabled else None)
+    assert runtime.data[METER_IDENTIFIER]["main"]["app_data"] == {"power": 50}
+    assert api.get_grid_status.await_count == int(enabled)
+
+
+async def test_combined_coordinator_retains_partial_failures_across_legacy_meter_poll() -> None:
+    """A successful meter poll must not clear a failed inverter's availability."""
+    api = _api()
+    api.get_inverter_data.side_effect = [RuntimeError("inverter offline"), GetInverterDataResponse(pac=100)]
+    api.get_meter_data.return_value = GetMeterDataResponse(tim="now", pac=10)
+    runtime = SolplanetRuntimeData(api)
+    runtime.data[INVERTER_IDENTIFIER] = {"bad": {"data": None}, "good": {"data": None}}
+    runtime.data[METER_IDENTIFIER] = {"meter": {"data": None}}
+    coordinator = SolplanetMeterUpdateCoordinator(HomeAssistant("/tmp"), runtime, _entry(), timedelta(seconds=10))
+
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert coordinator.failed_device_ids == {"bad"}
+    assert runtime.data[METER_IDENTIFIER]["meter"]["data"].pac == 10
+
+
+async def test_combined_coordinator_tracks_both_device_types_and_recovers() -> None:
+    """Partial failures in both families remain visible until the next successful cycle."""
+    api = _api()
+    api.get_inverter_data.side_effect = [RuntimeError("inverter offline"), GetInverterDataResponse(pac=100)]
+    api.get_meter_data.side_effect = [RuntimeError("meter offline"), GetMeterDataResponse(tim="now", pac=10)]
+    runtime = SolplanetRuntimeData(api)
+    runtime.data[INVERTER_IDENTIFIER] = {"bad-inv": {"data": None}, "good-inv": {"data": None}}
+    runtime.data[METER_IDENTIFIER] = {
+        "bad-meter": {"data": None},
+        "good-meter": {"data": None, "submeter_index": 1},
+    }
+    coordinator = SolplanetMeterUpdateCoordinator(HomeAssistant("/tmp"), runtime, _entry(), timedelta(seconds=10))
+
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success
+    assert coordinator.failed_device_ids == {"bad-inv", "bad-meter"}
+
+    api.get_inverter_data.side_effect = None
+    api.get_inverter_data.return_value = GetInverterDataResponse(pac=100)
+    api.get_meter_data.side_effect = None
+    api.get_meter_data.return_value = GetMeterDataResponse(tim="now", pac=10)
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success
+    assert coordinator.failed_device_ids == set()
+
+
+@pytest.mark.parametrize("failed_endpoint", ["inverter", "meter"])
+async def test_combined_coordinator_failure_and_recovery(failed_endpoint: str) -> None:
+    """A failed cycle is unavailable and a subsequent successful cycle recovers."""
+    api = _api()
+    api.get_inverter_data.return_value = GetInverterDataResponse(pac=100)
+    api.client.post.return_value = {"status": 200, "payload": {"power": 10}}
+    runtime = SolplanetRuntimeData(api)
+    runtime.data[INVERTER_IDENTIFIER] = {"inv": {"data": None}}
+    runtime.data[METER_IDENTIFIER] = {"meter": {"app_info": {}, "app_data": None}}
+    coordinator = SolplanetMeterUpdateCoordinator(HomeAssistant("/tmp"), runtime, _entry(), timedelta(seconds=10))
+    if failed_endpoint == "inverter":
+        api.get_inverter_data.side_effect = RuntimeError("offline")
+    else:
+        api.client.post.side_effect = RuntimeError("offline")
+
+    await coordinator.async_refresh()
+    assert not coordinator.last_update_success
+    if failed_endpoint == "inverter":
+        api.client.post.assert_not_awaited()
+
+    api.get_inverter_data.side_effect = None
+    api.client.post.side_effect = None
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success
+    assert coordinator.failed_device_ids == set()
+    assert runtime.data[METER_IDENTIFIER]["meter"]["app_data"] == {"power": 10}
 
 
 @pytest.mark.asyncio
@@ -1464,8 +1560,9 @@ async def test_dongle_live_polling_paths() -> None:
         await coordinator._async_update_runtime_data()
 
 
+@pytest.mark.parametrize("coordinator_type", [SolplanetInverterUpdateCoordinator, SolplanetMeterUpdateCoordinator])
 @pytest.mark.parametrize("status", [0, 1])
-async def test_grid_status_modbus_fallback(status: int) -> None:
+async def test_grid_status_modbus_fallback(status: int, coordinator_type) -> None:
     """Use the actual discovered slave and preserve fresh JSON telemetry."""
     api = _api()
     data = GetInverterDataResponse(pac=456)
@@ -1473,7 +1570,7 @@ async def test_grid_status_modbus_fallback(status: int) -> None:
     api.get_grid_status.return_value = status
     runtime = SolplanetRuntimeData(api)
     runtime.data[INVERTER_IDENTIFIER] = {"inv": {"info": GetInverterInfoItemResponse(add=7)}}
-    coordinator = SolplanetInverterUpdateCoordinator(
+    coordinator = coordinator_type(
         HomeAssistant("/tmp"), runtime, _entry(modbus_telemetry_fallbacks=True), timedelta(seconds=60)
     )
     await coordinator.async_refresh()
@@ -1580,7 +1677,8 @@ async def test_grid_status_is_read_for_each_discovered_inverter_under_shared_loc
     assert api.get_grid_status.await_count == 2
 
 
-async def test_grid_status_unsupported_register_stops_until_reload() -> None:
+@pytest.mark.parametrize("coordinator_type", [SolplanetInverterUpdateCoordinator, SolplanetMeterUpdateCoordinator])
+async def test_grid_status_unsupported_register_stops_until_reload(coordinator_type) -> None:
     """Unsupported reads stop while JSON telemetry continues, until a new coordinator."""
     api = _api()
     api.get_inverter_data.side_effect = [GetInverterDataResponse(pac=n) for n in range(4)]
@@ -1589,7 +1687,7 @@ async def test_grid_status_unsupported_register_stops_until_reload() -> None:
     runtime.data[INVERTER_IDENTIFIER] = {"inv": {"info": SimpleNamespace(add=7)}}
     entry = _entry(modbus_telemetry_fallbacks=True)
     hass = HomeAssistant("/tmp")
-    coordinator = SolplanetInverterUpdateCoordinator(hass, runtime, entry, timedelta(seconds=60))
+    coordinator = coordinator_type(hass, runtime, entry, timedelta(seconds=60))
     with patch("custom_components.solplanet.coordinator.monotonic", return_value=1000) as clock:
         for n, now in enumerate((1000, 1600, 100000)):
             clock.return_value = now
@@ -1599,7 +1697,7 @@ async def test_grid_status_unsupported_register_stops_until_reload() -> None:
             assert coordinator.last_update_success
         api.get_grid_status.assert_awaited_once_with(7)
 
-        reloaded = SolplanetInverterUpdateCoordinator(hass, runtime, entry, timedelta(seconds=60))
+        reloaded = coordinator_type(hass, runtime, entry, timedelta(seconds=60))
         await reloaded.async_refresh()
         result = runtime.data[INVERTER_IDENTIFIER]["inv"]["data"]
         assert (result.grid_sts, result.pac) == (1, 3)
